@@ -84,15 +84,3 @@ for idx in range(364):
 
     print(f'{(idx/360)*100}% complete')
 
-# %%
-#
-#Get file names
-flist = sorted(glob.glob(local_directory + '**'))
-
-# test_ds = xr.open_dataset(flist[0])
-
-# lat = test_ds['latitude']
-# lon = test_ds['longitude']
-
-
-# %%

@@ -362,5 +362,3 @@ for idx in range (len(time_list)):
     #Save interpolated GFS variables to netcdf
     save_GFS_to_nc(len_lat, len_lon, isobaric_data, new_relative_humidity, new_vertical_velocity, new_temperature, new_absolute_vorticity, time_list[idx], gfs_file_name)
 
-
-# %%

@@ -103,7 +103,7 @@ X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_
 rf_classifier = RandomForestClassifier(n_estimators=10, random_state=42)
 
 # Define the number of iterations to print progress
-progress_interval = 10  # You can adjust this interval as needed
+progress_interval = 10 
 
 # Training loop
 for i in range(0, len(X_train), progress_interval):
@@ -129,4 +129,5 @@ print(f"Accuracy: {accuracy:.2f}")
 
 report = classification_report(y_test, y_pred)
 print("Classification Report:\n", report)
+
 # %%
