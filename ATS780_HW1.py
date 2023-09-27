@@ -2,13 +2,20 @@
 #Script takes data prepared from GFS_download.py and CLAVR_x_organizer.py to run Random Forecst model
 
 #%%
+from graphviz import Source # To plot trees
+import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, classification_report
+from sklearn.metrics import confusion_matrix
+from sklearn import metrics
+from sklearn.inspection import permutation_importance
+from sklearn.tree import export_graphviz
 import glob
 import xarray as xr
 import pandas as pd
+import random
 
 # %%
 
@@ -22,106 +29,282 @@ clavrx_directory = '/mnt/data2/mking/ATS780/CLAVRX_data/'
 clavrx_flist = sorted(glob.glob(clavrx_directory + '*'))
 GFS_flist = sorted(glob.glob(processed_GFS_directory + '*'))
 
+#%%
+#Select 100 random latitude/longitude values to use on each file
+
+#Define the lat/lon values used from CLAVR_x_organizer
+res = 0.02
+left_lon = -100
+right_lon = -65
+top_lat = 50
+bottom_lat = 25
+
+#One dimensional arrays defining longitude and latitude
+len_lon = np.round(np.arange(left_lon,right_lon, res),2)
+len_lat = np.round(np.arange(bottom_lat, top_lat, res),2)
+
+#Us numpy meshgrid function to create 2d coordinates using lat/lon values
+meshlon, meshlat = np.meshgrid(len_lon, len_lat)
+
+#Set random seed for reproducibility
+random.seed(42)
+
+#Generate random lat/lon pairs
+random_lat_lon_idx_pairs = np.empty((len(clavrx_flist)*100, 2)).astype(int)
+for idx in range(len(clavrx_flist)*100):
+    lat_idx = random.randint(0, np.shape(len_lat)[0] - 1)
+    lon_idx = random.randint(0, np.shape(len_lon)[0] - 1)
+    random_lat_lon_idx_pairs[idx,0] = lat_idx
+    random_lat_lon_idx_pairs[idx,1] = lon_idx
+
 # %%
-#Load data clavrx data and update values to 0 and 1
-clavrx_load = xr.open_dataset(clavrx_flist[0])
-cloud_mask_data = np.squeeze(clavrx_load['cloud_mask'].data) #0 clear, 1 probably clear, 2 probably cloud, 3 cloudy
-cloud_mask = np.empty(cloud_mask_data.shape)
-cloud_mask[(cloud_mask_data >= 2 )] = 1 #Anything probably cloudy and cloudy becomes 1
-cloud_mask[(cloud_mask_data < 2)] = 0 #Anything probably clear and clear becomes 0
 
-#Load GFS data 
-GFS_load = xr.open_dataset(GFS_flist[0])
-isobaric = GFS_load['isobaric'].data
-relative_humidity_data = np.squeeze(GFS_load['relative_humidity'].data)
-vertical_velocity_data = np.squeeze(GFS_load['vertical_velocity'].data)
-temperature_data = np.squeeze(GFS_load['temperature'].data)
-absolute_vorticity_data = np.squeeze(GFS_load['absolute vorticity'].data)
+#Loop through files, pull out data based on selected lat/lon indexes and place into dataframe
+for idx in range(len(clavrx_flist)):
 
-# Initialize an empty dictionary to store the data for each variable
-data_dict = {}
+    #Load clavrx data and update values to 0 and 1
+    clavrx_load = xr.open_dataset(clavrx_flist[idx])
+    cloud_mask_data = np.squeeze(clavrx_load['cloud_mask'].data) #0 clear, 1 probably clear, 2 probably cloud, 3 cloudy
+    cloud_mask = np.empty(cloud_mask_data.shape)
+    cloud_mask[(cloud_mask_data >= 2 )] = 1 #Anything probably cloudy and cloudy becomes 1
+    cloud_mask[(cloud_mask_data < 2)] = 0 #Anything probably clear and clear becomes 0
 
-# Variable names
-variable_names = ['Cld_Msk', 'RH', 'VV', 'Temp', 'AbsVort']  
+    #Load GFS data 
+    GFS_load = xr.open_dataset(GFS_flist[idx])
+    isobaric = GFS_load['isobaric'].data
+    relative_humidity_data = np.squeeze(GFS_load['relative_humidity'].data)
+    vertical_velocity_data = np.squeeze(GFS_load['vertical_velocity'].data)
+    temperature_data = np.squeeze(GFS_load['temperature'].data)
+    absolute_vorticity_data = np.squeeze(GFS_load['absolute vorticity'].data)
 
-# Loop through variable names
-for variable in variable_names:
+    # Initialize an empty dictionary to store the data for each variable
+    data_dict = {}
 
-    #Add Cld_Msk values        
-    if variable == 'Cld_Msk':
-        data = cloud_mask[:, :]
+    # Variable names
+    variable_names = ['Cld_Msk', 'RH', 'VV', 'Temp', 'AbsVort']  
 
-        # Create column name
-        column_name = f'{variable}'
-        
-        # Add data to the dictionary
-        data_dict[column_name] = data.flatten()
+    #Current lat/lon index values
+    pair_idx_1 = idx * 100
+    pair_idx_2 = (idx * 100) + 100
 
-    # Loop through pressure levels
-    for pressure_level in isobaric:
-        # Create column name
-        column_name = f'{variable}_{pressure_level}mb'
-        
-        # Extract data for the current variable and pressure level
-        if variable == 'RH':
-            data = relative_humidity_data[isobaric == pressure_level, :, :]
+    # Loop through variable names
+    for variable in variable_names:
 
+        #Add Cld_Msk values        
+        if variable == 'Cld_Msk':
+            
+            data = cloud_mask[random_lat_lon_idx_pairs[ pair_idx_1 : pair_idx_2 , 0 ], random_lat_lon_idx_pairs[ pair_idx_1 : pair_idx_2 , 1 ] ]
+
+            # Create column name
+            column_name = f'{variable}'
+            
             # Add data to the dictionary
-            data_dict[column_name] = data.flatten()
+            data_dict[column_name] = data
 
-        elif variable == 'VV':
-            data = vertical_velocity_data[isobaric == pressure_level, :, :]
+        # Loop through pressure levels
+        for pressure_level in isobaric:
+            # Create column name
+            column_name = f'{variable}_{pressure_level}mb'
+            
+            # Extract data for the current variable and pressure level
+            if variable == 'RH':
+                data = relative_humidity_data[isobaric == pressure_level, random_lat_lon_idx_pairs[ pair_idx_1 : pair_idx_2 , 0 ], random_lat_lon_idx_pairs[ pair_idx_1 : pair_idx_2 , 1 ]]
 
-            # Add data to the dictionary
-            data_dict[column_name] = data.flatten()
+                # Add data to the dictionary
+                data_dict[column_name] = data
 
-        elif variable == 'VV':
-            data = temperature_data[isobaric == pressure_level, :, :]
+            # elif variable == 'VV':
+            #     data = vertical_velocity_data[isobaric == pressure_level, random_lat_lon_idx_pairs[ pair_idx_1 : pair_idx_2 , 0 ], random_lat_lon_idx_pairs[ pair_idx_1 : pair_idx_2 , 1 ]]
 
-            # Add data to the dictionary
-            data_dict[column_name] = data.flatten()
+            #     # Add data to the dictionary
+            #     data_dict[column_name] = data
 
-        elif variable == 'AbsVort':
-            data = absolute_vorticity_data[isobaric == pressure_level, :, :]
+            # elif variable == 'Temp':
+            #     data = temperature_data[isobaric == pressure_level, random_lat_lon_idx_pairs[ pair_idx_1 : pair_idx_2 , 0 ], random_lat_lon_idx_pairs[ pair_idx_1 : pair_idx_2 , 1 ]]
 
-            # Add data to the dictionary
-            data_dict[column_name] = data.flatten()
+            #     # Add data to the dictionary
+            #     data_dict[column_name] = data
 
-df = pd.DataFrame(data_dict)
+            # elif variable == 'AbsVort':
+            #     data = absolute_vorticity_data[isobaric == pressure_level, random_lat_lon_idx_pairs[ pair_idx_1 : pair_idx_2 , 0 ], random_lat_lon_idx_pairs[ pair_idx_1 : pair_idx_2 , 1 ]]
+
+            #     # Add data to the dictionary
+            #     data_dict[column_name] = data
+
+    if idx == 0: #If first file...create dataframe
+        df = pd.DataFrame(data_dict)
+    else: #If any other...append dataframe to first
+        next_df = pd.DataFrame(data_dict)
+        df = pd.concat([df, next_df], ignore_index=True)
+
+    print(f'{idx + 1}/{len(clavrx_flist)} completed', end='\r')
+
+#%%
+
+#Save Dataframe
+df.to_csv('HW1_data.csv', index=False)
+
+# #Load a DataFrame from a CSV file...run if needed
+# df = pd.read_csv('HW1_data.csv')
 
 #%%
 # Split the data
 X = df.drop(columns=['Cld_Msk'])
 y = df['Cld_Msk']
 
-# Split into training and testing sets
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+# Reserve the held-back testing data
+X_trainval, X_test, y_trainval, y_test = train_test_split(X, y, test_size=.2,random_state=13) 
+
+# Now reserve validation for hyperparamter tuning
+X_train, X_val, y_train, y_val = train_test_split(X_trainval, y_trainval, test_size=.2,random_state=13)
+
+#Define classes
+classes = ['cloud']
 
 # %%
+#Define random forest and train model
+
+#Define Hyperparameters
+fd = {
+    "tree_number": 100,    # number of trees to "average" together to create a random forest
+    "tree_depth": 8,      # maximum depth allowed for each tree
+    "node_split": 20,     # minimum number of training samples needed to split a node
+    "leaf_samples": 1,    # minimum number of training samples required to make a leaf node
+    "criterion": 'gini',  # information gain metric, 'gini' or 'entropy'
+    "bootstrap": False,   # whether to perform "bagging=bootstrap aggregating" or not
+    "max_samples": None,  # number of samples to grab when training each tree IF bootstrap=True, otherwise None 
+    "random_state": 13    # set random state for reproducibility
+}
 
 # Create and train the Random Forest classifier
-rf_classifier = RandomForestClassifier(n_estimators=10, random_state=42)
+rf_classifier = RandomForestClassifier(n_estimators = fd["tree_number"],
+                           random_state = fd["random_state"],
+                           min_samples_split = fd["node_split"],
+                           min_samples_leaf = fd["leaf_samples"],
+                           criterion = fd["criterion"],
+                           max_depth = fd["tree_depth"],
+                           bootstrap = fd["bootstrap"],
+                           max_samples = fd["max_samples"])
 
-# Define the number of iterations to print progress
-progress_interval = 10 
+#Train random forest
+rf_classifier.fit(X_train, y_train)
 
-# Training loop
-for i in range(0, len(X_train), progress_interval):
-    end = min(i + progress_interval, len(X_train))
-    X_batch = X_train[i:end]
-    y_batch = y_train[i:end]
+#Make prediction on all training data
+y_pred_train = rf_classifier.predict(X_train)
+
+#%%
+#Confusion Matrix on training data
+
+acc = metrics.accuracy_score(y_train, y_pred_train)
+print("training accuracy: ", np.around(acc*100), '%')
+
+confusion = confusion_matrix(y_train, y_pred_train)
+
+print(confusion)
+
+#%%
+#Confusion Matrix on validation data
+
+#Make prediction on validation data
+y_pred_val = rf_classifier.predict(X_val)
+
+acc = metrics.accuracy_score(y_val, y_pred_val)
+print("validation accuracy: ", np.around(acc*100), '%')
+
+confusion_validation = confusion_matrix(y_val, y_pred_val)
+
+print(confusion_validation)
+
+#%%
+#Look at individual tree
+local_path = '/home/mking/ATS780/'
+fig_savename = 'rf_cloud_tree'
+tree_to_plot = 0 # Enter the value of the tree that you want to see!
+
+#Get predictor feature names
+column_names = X.columns
+column_names = column_names.tolist()
+
+tree = rf_classifier[tree_to_plot] # Obtain the tree to plot
+tree_numstr = str(tree_to_plot) # Adds the tree number to filename
+
+complete_savename = fig_savename + '_' + tree_numstr + '.dot'
+export_graphviz(tree,
+                out_file=local_path + '/' + complete_savename,
+                filled=True,
+                proportion=False,
+                leaves_parallel=False,
+                feature_names=column_names)
+
+Source.from_file(local_path + complete_savename)
+
+#%%
+#Feature importance
+
+def calc_importances(rf, feature_list):
+    ''' Calculate feature importance '''
+    # Get numerical feature importances
+    importances = list(rf.feature_importances_)
+
+    # List of tuples with variable and importance
+    feature_importances = [(feature, round(importance, 2)) for feature, importance in zip(feature_list, importances)]
+
+    # Sort the feature importances by most important first
+    feature_importances = sorted(feature_importances, key = lambda x: x[1], reverse = True)
+
+    # Print out the feature and importances 
+    print('')
+    [print('Variable: {:20} Importance: {}'.format(*pair)) for pair in feature_importances]
+    print('')
+
+    return importances
+
+def plot_feat_importances(importances, feature_list):
+    ''' Plot the feature importance calculated by calc_importances ''' 
+    plt.figure(figsize=(19,20))
+    # Set the style
+    plt.style.use('fivethirtyeight')
+    # list of x locations for plotting
+    x_values = list(range(len(importances)))
+    # Make a bar chart
+    plt.barh(x_values, importances)
+    # Tick labels for x axis
+    plt.yticks(x_values, feature_list)
+    # Axis labels and title
+    plt.xlabel('Importance'); plt.ylabel('Variable'); plt.title('Variable Importances')
     
-    # Train on the current batch
-    rf_classifier.fit(X_batch, y_batch)
     
-    # Calculate accuracy on the entire training set (you can use a smaller validation set)
-    y_train_pred = rf_classifier.predict(X_train)
-    train_accuracy = accuracy_score(y_train, y_train_pred)
+plot_feat_importances(calc_importances(rf_classifier, column_names),  column_names)
+
+
+#%%
+#Permutation importance
+
+# Single-pass permutation
+permute = permutation_importance(
+    rf_classifier, X_val, y_val, n_repeats=20, random_state=fd["random_state"])
+
+# Sort the importances
+sorted_idx = permute.importances_mean.argsort()
+
+def plot_perm_importances(permute, sorted_idx, feature_list):
+    ''' Plot the permutation importances calculated in previous cell '''
+    # Sort the feature list based on 
+    new_feature_list = []
+    for index in sorted_idx:  
+        new_feature_list.append(feature_list[index])
+
+    fig, ax = plt.subplots(figsize = (19,20))
+    ax.boxplot(permute.importances[sorted_idx].T,
+           vert=False, labels=new_feature_list)
+    ax.set_title("Permutation Importances")
+    fig.tight_layout()
     
-    print(f"Processed {end}/{len(X_train)} samples. Train Accuracy: {train_accuracy:.2f}")
+plot_perm_importances(permute, sorted_idx, column_names)
+
 
 # %% 
-# Evaluate the model
+# Evaluate the model on test data
 y_pred = rf_classifier.predict(X_test)
 
 accuracy = accuracy_score(y_test, y_pred)

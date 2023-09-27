@@ -10,6 +10,12 @@ import numpy as np
 from datetime import datetime, timedelta
 import netCDF4 as nc
 import sys
+import matplotlib.pyplot as plt
+import cartopy.crs as ccrs
+import cartopy.feature as cfeature
+from cartopy.mpl.gridliner import LONGITUDE_FORMATTER, LATITUDE_FORMATTER
+from cartopy.mpl.ticker import LongitudeFormatter, LatitudeFormatter
+
 
 #Import functions from mking_fns
 sys.path.append('/home/mking/Custom_Functions/')
@@ -184,10 +190,16 @@ for idx in range(364):
 
 #%% 
 # Set rectilinear grid to interpolate data on
+# res = 0.02
+# left_lon = -113
+# right_lon = -62
+# top_lat = 50
+# bottom_lat = 15
+
 res = 0.02
-left_lon = -110
-right_lon = -70  
-top_lat = 45
+left_lon = -100
+right_lon = -65
+top_lat = 50
 bottom_lat = 25
 
 #One dimensional arrays defining longitude and latitude
@@ -200,6 +212,53 @@ meshlon, meshlat = np.meshgrid(len_lon, len_lat)
 #Get location for conus GOES file to use as reference for interpolation of data on to grid
 GOES16_CONUS = '/mnt/data2/mking/ATS780/GOES_files/OR_ABI-L1b-RadC-M6C13_G16_s20230911401170_e20230911403557_c20230911403596.nc'
 geo_xarray = xr.open_dataset(GOES16_CONUS)
+
+# Get test cloud mask data
+test_dataset = xr.open_dataset(clavrx_flist[0], engine='netcdf4')
+cloud_mask = test_dataset['cloud_mask'].data
+lat = test_dataset['latitude']
+lon = test_dataset['longitude']
+
+#Interpolate values of GOES data to rectilinear grid (calculating nearest grid indexes here)
+i,j,reflon,reflat, boolean_outside_values = GOESlonlat2xy_fn(meshlon,meshlat,geo_xarray,method = 'nearest', boolean= True)
+m,n,_,_,_ = meshgrid_finder(meshlat, meshlon, res, reflat, reflon,method='nearest')
+
+#Interpolating cloud mask data to rectilinear grid
+print('Interpolating Cloud Mask Data to new grid')
+new_cld_msk = np.empty(meshlat.shape)
+new_cld_msk[m,n] = cloud_mask[j,i]
+
+#Pixels that aren't "seen" by satellite replace with nans
+new_cld_msk[boolean_outside_values] = np.nan
+
+# Create a figure and axis for the plot
+fig, ax = plt.subplots(subplot_kw={'projection': ccrs.PlateCarree()})
+
+# Define extent using the Plate Carree projection
+extent = [meshlon.min(), meshlon.max(), meshlat.min(), meshlat.max()]
+
+# Use imshow to plot data with the correct coordinate transformation
+image = ax.imshow(new_cld_msk, cmap='jet', vmin=0, vmax=3, origin='lower', extent=extent)
+
+# Add gridlines
+gl = ax.gridlines(draw_labels=True, linewidth=1, color='gray', alpha=0.5, linestyle='--')
+gl.xlabels_top = False
+gl.ylabels_right = False
+gl.xformatter = LONGITUDE_FORMATTER
+gl.yformatter = LATITUDE_FORMATTER
+
+# Add Figure Title
+plt.title(f"CLAVRX Cloud Mask Test", fontsize=10, pad=15)
+
+# Adding border features last to be on top
+ax.add_feature(cfeature.COASTLINE.with_scale('50m'), linewidth=2)
+ax.add_feature(cfeature.STATES.with_scale('50m'), linestyle=':', edgecolor='black')
+ax.add_feature(cfeature.BORDERS.with_scale('50m'), linewidth=2, edgecolor='black')
+
+# Show Colorbar
+cbar = plt.colorbar(image, ax=ax, shrink=0.5)
+
+plt.show()
 
 # %%
 #Save data into netcdf files in ATS780 directory 
