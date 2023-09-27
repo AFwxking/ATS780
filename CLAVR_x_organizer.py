@@ -57,7 +57,7 @@ def save_to_netcdf(latitude, longitude, cloud_mask, datetime_obj, output_file):
     print(f"Data saved to {output_file}")
 
 
-def save_GFS_to_nc(latitude, longitude, isobaric, relative_humidity, vertical_velocity, temperature, absolute_vorticity, datetime_obj, output_file):
+def save_GFS_to_nc(latitude, longitude, isobaric, relative_humidity, vertical_velocity, temperature, absolute_vorticity, cloud_mixing_ratio, total_cloud_cover, datetime_obj, output_file):
     """
     Save latitude, longitude, GFS_data, and datetime data into a NetCDF file.
 
@@ -91,6 +91,8 @@ def save_GFS_to_nc(latitude, longitude, isobaric, relative_humidity, vertical_ve
         vertical_velocity_var = ncfile.createVariable('vertical_velocity', 'f4', ('time', 'isobaric','latitude', 'longitude'))
         temperature_var = ncfile.createVariable('temperature', 'f4', ('time', 'isobaric','latitude', 'longitude'))
         absolute_vorticity_var = ncfile.createVariable('absolute vorticity', 'f4', ('time', 'isobaric','latitude', 'longitude'))
+        cloud_mixing_ratio_var = ncfile.createVariable('cloud_mixing_ratio', 'f4', ('time', 'isobaric','latitude', 'longitude'))
+        total_cloud_cover_var =  ncfile.createVariable('total_cloud_cover', 'f4', ('time', 'isobaric','latitude', 'longitude'))
         time_var = ncfile.createVariable('time', 'f8', ('time',))
 
         # Set the data values for latitude, longitude, cloud_mask, and time
@@ -101,6 +103,8 @@ def save_GFS_to_nc(latitude, longitude, isobaric, relative_humidity, vertical_ve
         vertical_velocity_var[0, :, :, :] = vertical_velocity
         temperature_var[0,:,:,:] = temperature
         absolute_vorticity_var[0,:,:,:] = absolute_vorticity
+        cloud_mixing_ratio_var[0,:,:,:] = cloud_mixing_ratio
+        total_cloud_cover_var[0,:,:,:] = total_cloud_cover
         time_var[0] = nc.date2num(datetime_obj, units='hours since 1970-01-01 00:00:00', calendar='gregorian')
 
     print(f"Data saved to {output_file}")
@@ -132,7 +136,14 @@ time_list = []
 var_list = ['cld_height_base_acha','cld_height_acha', 'cloud_mask' ]
 
 #Loop to download files
-for idx in range(364):
+for idx in range(365):
+
+    if idx > 0:
+        #Update time selection
+        sel_time = sel_time + timedelta(hours = 24)
+        sel_year = sel_time.strftime('%Y')
+        sel_julian_day = sel_time.strftime('%j')
+        sel_hr = sel_time.strftime('%H')
 
     #Set directory string
     dir_1 = '/mnt/multilayer/ynoh/GOES16_ABI/clavrx_run_SLIDER/RadC/output/'
@@ -141,12 +152,6 @@ for idx in range(364):
 
     #Combine strings
     full_dir = dir_1 + dir_2 + dir_3
-
-    #Update time selection
-    sel_time = sel_time + timedelta(hours = 24)
-    sel_year = sel_time.strftime('%Y')
-    sel_julian_day = sel_time.strftime('%j')
-    sel_hr = sel_time.strftime('%H')
 
     try: #File may not exist...loading data within try/except
         #Test file
@@ -187,6 +192,8 @@ for idx in range(364):
         #Print error and repeat loop
         print(e)
         continue
+
+    
 
 #%% 
 # Set rectilinear grid to interpolate data on
@@ -259,6 +266,8 @@ ax.add_feature(cfeature.BORDERS.with_scale('50m'), linewidth=2, edgecolor='black
 cbar = plt.colorbar(image, ax=ax, shrink=0.5)
 
 plt.show()
+plt.savefig('cloud_mask_test_plot.png')
+plt.close()
 
 # %%
 #Save data into netcdf files in ATS780 directory 
@@ -354,8 +363,10 @@ for idx in range (len(time_list)):
     GFS_lon_data = GFS_load['longitude'].data
     GFS_lat_data = GFS_load['latitude'].data
     isobaric_data_full = GFS_load['isobaric'].data/100 #Converting to mb
-    isobaric_bool = (isobaric_data_full >= 100) #Create boolean index that has pressure coordinate at or below 100mb (anything above probably no cloud)
+    isobaric_bool = (isobaric_data_full >= 100) #Create boolean index that has pressure coordinate at or below 100mb in height (anything above probably no cloud)
     isobaric_data = isobaric_data_full[isobaric_bool] #Update isobaric coordinate
+    isobaric1 = GFS_load['isobaric1'].data/100 #Converting alternate pressure coordinates to mb
+    isobaric1_bool = (isobaric1 >= 100) #Create boolean index that has pressure coordinate at or below 100mb
     vertical_velocity_data = np.squeeze(GFS_load['Vertical_velocity_pressure_isobaric'].data)
     vertical_velocity_data = vertical_velocity_data[isobaric_bool, :, :] #Eliminate values higher than 100mb
     relative_humidity_data = np.squeeze(GFS_load['Relative_humidity_isobaric'].data)
@@ -364,6 +375,10 @@ for idx in range (len(time_list)):
     temperature_data = temperature_data[isobaric_bool, :, :] #Eliminate values higher than 100mb
     absolute_vorticity_data = np.squeeze(GFS_load['Absolute_vorticity_isobaric'].data)
     absolute_vorticity_data = absolute_vorticity_data[isobaric_bool, :, :] #Eliminate value higher than 100mb
+    cloud_mixing_ratio_data = np.squeeze(GFS_load['Cloud_mixing_ratio_isobaric'].data) * 1000 #Get in grams/kg...uses isobaric1 coordinate...same as updated isobaric_data created above
+    cloud_mixing_ratio_data = cloud_mixing_ratio_data[isobaric1_bool, :, :] #Eliminate values above 100mb
+    total_cloud_cover_data = np.squeeze(GFS_load['Total_cloud_cover_isobaric'].data)
+    total_cloud_cover_data = total_cloud_cover_data[isobaric1_bool, :, :]
 
     #Subtract 360 from longitudes that should be negative (i.e. west of prime meridian)
     GFS_lon_data[GFS_lon_data > 180] = GFS_lon_data[GFS_lon_data > 180] - 360
@@ -388,12 +403,17 @@ for idx in range (len(time_list)):
     relative_humidity_data = relative_humidity_data[:, GFS_index]
     temperature_data = temperature_data[:, GFS_index]
     absolute_vorticity_data = absolute_vorticity_data[:,GFS_index]
+    cloud_mixing_ratio_data = cloud_mixing_ratio_data[:,GFS_index]
+    total_cloud_cover_data = total_cloud_cover_data[:,GFS_index]
 
     #Using shape of isolated meshgrid to reshape isolated variables
     vertical_velocity_data = np.resize(vertical_velocity_data,(np.shape(isobaric_data)[0],np.shape(iso_lon_mesh)[0], np.shape(iso_lon_mesh)[1]))
     relative_humidity_data  = np.resize(relative_humidity_data,(np.shape(isobaric_data)[0],np.shape(iso_lon_mesh)[0], np.shape(iso_lon_mesh)[1]))
     temperature_data  = np.resize(temperature_data,(np.shape(isobaric_data)[0],np.shape(iso_lon_mesh)[0], np.shape(iso_lon_mesh)[1]))
     absolute_vorticity_data  = np.resize(absolute_vorticity_data,(np.shape(isobaric_data)[0],np.shape(iso_lon_mesh)[0], np.shape(iso_lon_mesh)[1]))
+    cloud_mixing_ratio_data = np.resize(cloud_mixing_ratio_data,(np.shape(isobaric_data)[0],np.shape(iso_lon_mesh)[0], np.shape(iso_lon_mesh)[1]))
+    total_cloud_cover_data = np.resize(total_cloud_cover_data,(np.shape(isobaric_data)[0],np.shape(iso_lon_mesh)[0], np.shape(iso_lon_mesh)[1]))
+
 
     #Interpolating GFS data to meshgrid
     print('Working on interpolation')
@@ -401,11 +421,15 @@ for idx in range (len(time_list)):
     new_relative_humidity = np.empty((np.shape(isobaric_data)[0], np.shape(meshlon)[0], np.shape(meshlon)[1]))
     new_temperature = np.empty((np.shape(isobaric_data)[0], np.shape(meshlon)[0], np.shape(meshlon)[1]))
     new_absolute_vorticity = np.empty((np.shape(isobaric_data)[0], np.shape(meshlon)[0], np.shape(meshlon)[1]))
+    new_cloud_mixing_ratio = np.empty((np.shape(isobaric_data)[0], np.shape(meshlon)[0], np.shape(meshlon)[1]))
+    new_total_cloud_cover = np.empty((np.shape(isobaric_data)[0], np.shape(meshlon)[0], np.shape(meshlon)[1]))
     for pres_index in range(np.shape(isobaric_data)[0]):
         new_vertical_velocity[pres_index,:,:] = bilinear_interp_fn(iso_lon_mesh,iso_lat_mesh, vertical_velocity_data[pres_index,:,:], meshlon, meshlat)
         new_relative_humidity[pres_index,:,:] = bilinear_interp_fn(iso_lon_mesh,iso_lat_mesh, relative_humidity_data[pres_index,:,:], meshlon, meshlat)
         new_temperature[pres_index,:,:] = bilinear_interp_fn(iso_lon_mesh,iso_lat_mesh, temperature_data[pres_index,:,:], meshlon, meshlat)
         new_absolute_vorticity[pres_index,:,:] = bilinear_interp_fn(iso_lon_mesh,iso_lat_mesh, absolute_vorticity_data[pres_index,:,:], meshlon, meshlat)
+        new_cloud_mixing_ratio[pres_index,:,:] = bilinear_interp_fn(iso_lon_mesh,iso_lat_mesh, cloud_mixing_ratio_data[pres_index,:,:], meshlon, meshlat)
+        new_total_cloud_cover[pres_index,:,:] = bilinear_interp_fn(iso_lon_mesh,iso_lat_mesh, total_cloud_cover_data[pres_index,:,:], meshlon, meshlat)
         print(str(round((((pres_index + 1)/np.shape(isobaric_data)[0]))*100,0))+'% complete...',end='\r')
 
 
@@ -419,5 +443,44 @@ for idx in range (len(time_list)):
     gfs_file_name = processed_GFS_directory + 'GFS_' + file_year + file_month + file_day + file_hr + '.nc'
 
     #Save interpolated GFS variables to netcdf
-    save_GFS_to_nc(len_lat, len_lon, isobaric_data, new_relative_humidity, new_vertical_velocity, new_temperature, new_absolute_vorticity, time_list[idx], gfs_file_name)
+    save_GFS_to_nc(len_lat, len_lon, isobaric_data, new_relative_humidity, new_vertical_velocity, new_temperature, new_absolute_vorticity, new_cloud_mixing_ratio, new_total_cloud_cover, time_list[idx], gfs_file_name)
 
+    
+    #Make plot if first iteration
+    if idx == 0:
+
+        cld_cover_test = np.max(new_total_cloud_cover, axis = 0)
+
+        fig, ax = plt.subplots(subplot_kw={'projection': ccrs.PlateCarree()})
+
+        # Define extent using the Plate Carree projection
+        extent = [meshlon.min(), meshlon.max(), meshlat.min(), meshlat.max()]
+        # extent = [GFS_lon_1d.min(), GFS_lon_1d.max(), GFS_lat_1d.min(), GFS_lat_1d.max()]
+
+        # Use imshow to plot data with the correct coordinate transformation
+        image = ax.imshow(cld_cover_test, cmap='jet', vmin=0, vmax=100, origin='lower', extent=extent)
+
+        # Add gridlines
+        gl = ax.gridlines(draw_labels=True, linewidth=1, color='gray', alpha=0.5, linestyle='--')
+        gl.xlabels_top = False
+        gl.ylabels_right = False
+        gl.xformatter = LONGITUDE_FORMATTER
+        gl.yformatter = LATITUDE_FORMATTER
+
+        # Add Figure Title
+        plt.title(f"GFS Total Cloud Cover Plot Test", fontsize=10, pad=15)
+
+        # Adding border features last to be on top
+        ax.add_feature(cfeature.COASTLINE.with_scale('50m'), linewidth=2)
+        ax.add_feature(cfeature.STATES.with_scale('50m'), linestyle=':', edgecolor='black')
+        ax.add_feature(cfeature.BORDERS.with_scale('50m'), linewidth=2, edgecolor='black')
+
+        # Show Colorbar
+        cbar = plt.colorbar(image, ax=ax, shrink=0.5)
+
+        plt.show()
+        plt.savefig('GFS_data_plot.png')
+        plt.close()
+
+
+# %%
