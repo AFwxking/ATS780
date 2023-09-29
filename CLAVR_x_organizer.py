@@ -265,8 +265,8 @@ ax.add_feature(cfeature.BORDERS.with_scale('50m'), linewidth=2, edgecolor='black
 # Show Colorbar
 cbar = plt.colorbar(image, ax=ax, shrink=0.5)
 
-plt.show()
 plt.savefig('cloud_mask_test_plot.png')
+plt.show()
 plt.close()
 
 # %%
@@ -358,6 +358,20 @@ for idx in range (len(time_list)):
 #Loop through each GFS file, interpolate to match grid, and then save into netcdf
 for idx in range (len(time_list)):
 
+    #From datetime object get required strings
+    file_year = time_list[idx].strftime('%Y')
+    file_month = time_list[idx].strftime('%m')
+    file_day = time_list[idx].strftime('%d')
+    file_hr = time_list[idx].strftime('%H')
+
+    #Create filename and concatenate to local_directory
+    gfs_file_name = processed_GFS_directory + 'GFS_' + file_year + file_month + file_day + file_hr + '.nc'
+
+    #Check if file exists before interpolating...if there already...skip it
+    if os.path.exists(gfs_file_name):
+        print(f'{gfs_file_name} already exists...skipping and going to next file.')
+        continue
+
     #Load GFS data
     GFS_load = xr.open_dataset(GFS_flist[idx])
     GFS_lon_data = GFS_load['longitude'].data
@@ -432,16 +446,6 @@ for idx in range (len(time_list)):
         new_total_cloud_cover[pres_index,:,:] = bilinear_interp_fn(iso_lon_mesh,iso_lat_mesh, total_cloud_cover_data[pres_index,:,:], meshlon, meshlat)
         print(str(round((((pres_index + 1)/np.shape(isobaric_data)[0]))*100,0))+'% complete...',end='\r')
 
-
-    #From datetime object get required strings
-    file_year = time_list[idx].strftime('%Y')
-    file_month = time_list[idx].strftime('%m')
-    file_day = time_list[idx].strftime('%d')
-    file_hr = time_list[idx].strftime('%H')
-
-    #Create filename and concatenate to local_directory
-    gfs_file_name = processed_GFS_directory + 'GFS_' + file_year + file_month + file_day + file_hr + '.nc'
-
     #Save interpolated GFS variables to netcdf
     save_GFS_to_nc(len_lat, len_lon, isobaric_data, new_relative_humidity, new_vertical_velocity, new_temperature, new_absolute_vorticity, new_cloud_mixing_ratio, new_total_cloud_cover, time_list[idx], gfs_file_name)
 
@@ -478,9 +482,162 @@ for idx in range (len(time_list)):
         # Show Colorbar
         cbar = plt.colorbar(image, ax=ax, shrink=0.5)
 
-        plt.show()
         plt.savefig('GFS_data_plot.png')
+        plt.show()
         plt.close()
 
 
+# %%
+
+#Get Clavrx files that will be used as the 3hr persistance to use as baseline
+
+#Create empty file list
+persistance_clavrx_flist = []
+
+#Creating variable list to check
+var_list = ['cld_height_base_acha','cld_height_acha', 'cloud_mask' ]
+
+#Loop to find persistance files
+for idx in range (len(time_list)):
+
+    #Update time selection
+    sel_time = time_list[idx] - timedelta(hours=3)
+    sel_year = sel_time.strftime('%Y')
+    sel_julian_day = sel_time.strftime('%j')
+    sel_hr = sel_time.strftime('%H')
+        
+    #Set directory string
+    dir_1 = '/mnt/multilayer/ynoh/GOES16_ABI/clavrx_run_SLIDER/RadC/output/'
+    dir_2 = sel_year + sel_julian_day + '/'
+    dir_3 = 'clavrx_goes16_'+ sel_year + '_' + sel_julian_day + '_' + sel_hr + '0117.level2.hdf'
+
+    #Combine strings
+    full_dir = dir_1 + dir_2 + dir_3
+
+    try: #File may not exist...loading data within try/except
+        #Test file
+        data_load = xr.open_dataset(full_dir, engine ='netcdf4')
+
+        #Get variables from dataset
+        vars = list(data_load.variables)
+
+        #Initialize test variable
+        var_test = np.zeros((len(var_list)))
+
+        #Check for variables
+        for var_idx in range(len(var_list)):
+            if var_list[var_idx] in vars:
+                var_test[var_idx] = 1
+
+        #Go to next iteration if missing a variable
+        if np.min(var_test) == 0:
+            print('Missing variable...going to next sample iteration')
+            continue
+        
+        #Save file directory & time
+        print(f'Saving file directory: {full_dir}')
+        persistance_clavrx_flist.append(full_dir)
+
+    except ValueError as e:
+        # Print error and repeat loop
+        print(e)
+        persistance_clavrx_flist.append('No File')
+        continue
+
+    except OSError as e:
+        # Print error and repeat loop
+        print(e)
+        persistance_clavrx_flist.append('No File')
+        continue
+
+    except KeyError as e:
+        #Print error and repeat loop
+        print(e)
+        persistance_clavrx_flist.append('No File')
+        continue
+
+#Find where there are no files
+def indexes(iterable, obj):
+    return (index for index, elem in enumerate(iterable) if elem == obj)
+
+nofile_indexes = indexes(persistance_clavrx_flist, 'No File')
+nofile_indexes = (list(nofile_indexes))
+
+# Specify the local directory where the interpolated GFS data resides
+processed_GFS_directory = '/mnt/data2/mking/ATS780/processed_GFS_files/'
+
+# Specify the local directory where the interpolated CLAVRx data resides
+clavrx_directory = '/mnt/data2/mking/ATS780/CLAVRX_data/'
+
+#Get the sorted file list in each directory
+final_clavrx_flist = sorted(glob.glob(clavrx_directory + '*'))
+final_GFS_flist = sorted(glob.glob(processed_GFS_directory + '*'))
+
+#Delete files that don't have persistance file
+for nofile_idx in nofile_indexes:
+    file_path = final_clavrx_flist[nofile_idx]
+    try:
+        os.remove(file_path)
+        print(file_path)
+    except OSError as e:
+        print(f"Error: {e}")
+
+    file_path = final_GFS_flist[nofile_idx]
+
+    try:
+        os.remove(file_path)
+        print(file_path)
+    except OSError as e:
+        print(f"Error: {e}")
+
+#Delete "No File" instances from persistance_clavrx_flist
+nofile_indexes.sort(reverse=True)  # Sort in reverse order to avoid index issues
+for i in nofile_indexes:
+    del persistance_clavrx_flist[i]
+    del time_list[i]
+
+# %%
+#With Persistance Clavrx Files List...save and interpolate data to process in homework script later...
+
+# Specify the local directory where you want to save the file
+local_directory = '/mnt/data2/mking/ATS780/Persist_CLAVRX_data_/'
+
+# Create the local directory if it doesn't exist
+os.makedirs(local_directory, exist_ok=True)
+
+
+for idx in range(len(persistance_clavrx_flist)):
+
+    #From datetime object get required strings
+    sel_time = time_list[idx] - timedelta(hours=3)
+    file_year = sel_time.strftime('%Y')
+    file_month = sel_time.strftime('%m')
+    file_day = sel_time.strftime('%d')
+    file_hr = sel_time.strftime('%H')
+    
+    #Create filename and concatenate to local_directory
+    c_file_name = local_directory + 'clavrx_' + file_year + file_month + file_day + file_hr + '.nc'
+
+    #Load data
+    data_load = xr.open_dataset(clavrx_flist[idx], engine ='netcdf4')
+
+    #Get needed variables (using cloud mask and lat/lon)
+    lat = data_load['latitude'].data
+    lon = data_load['longitude'].data
+    cld_msk = data_load['cloud_mask'].data
+
+    #Preallocate array in correct shape
+    new_cld_msk = np.empty(meshlat.shape)
+
+    #Interpolate values of GOES data to rectilinear grid (calculating nearest grid indexes here)
+    i,j,reflon,reflat = GOESlonlat2xy_fn(meshlon,meshlat,geo_xarray,method = 'nearest')
+    m,n,_,_,_= meshgrid_finder(meshlat, meshlon, res, reflat, reflon,method='nearest')
+
+    #Interpolating cloud mask data to rectilinear grid
+    print('Interpolating Cloud Mask Data to new grid')
+    new_cld_msk = np.empty(meshlat.shape)
+    new_cld_msk[m,n] = cld_msk[j,i]
+
+    #Save interpolated data
+    save_to_netcdf(len_lat, len_lon, new_cld_msk, sel_time, c_file_name)
 # %%
