@@ -208,7 +208,7 @@ y_val = y_val.drop(columns=['Cld_Msk_Persist'])
 
 #Define Hyperparameters
 fd = {
-    "tree_number": 100,    # number of trees to "average" together to create a random forest
+    "tree_number": 15,    # number of trees to "average" together to create a random forest
     "tree_depth": 8,      # maximum depth allowed for each tree
     "node_split": 50,     # minimum number of training samples needed to split a node
     "leaf_samples": 50,    # minimum number of training samples required to make a leaf node
@@ -266,6 +266,13 @@ confusion_matrix_plot(y_pred_train, y_train['Cld_Msk'], pred_classes, true_class
 #Plot Confusion Matrix for baseline
 confusion_matrix_plot(y_train_baseline, y_train['Cld_Msk'], pred_classes, true_classes)
 
+acc = metrics.accuracy_score(y_train, y_train_baseline)
+print("baseline training accuracy: ", np.around(acc*100), '%')
+
+#Confusion numbers for baseline
+confusion = confusion_matrix(y_train, y_train_baseline)
+print(confusion)
+
 #%%
 #Confusion Matrix on validation data
 
@@ -284,6 +291,13 @@ confusion_matrix_plot(y_pred_val, y_val['Cld_Msk'], pred_classes, true_classes)
 
 #Plot Confusion Matrix for baseline
 confusion_matrix_plot(y_val_baseline, y_val['Cld_Msk'], pred_classes, true_classes)
+
+acc = metrics.accuracy_score(y_val, y_val_baseline)
+print("baseline validation accuracy: ", np.around(acc*100), '%')
+
+#Confusion numbers for baseline
+confusion = confusion_matrix(y_val, y_val_baseline)
+print(confusion)
 
 #%%
 #Look at individual tree
@@ -364,7 +378,7 @@ def plot_perm_importances(permute, sorted_idx, feature_list):
     for index in sorted_idx:  
         new_feature_list.append(feature_list[index])
 
-    fig, ax = plt.subplots(figsize = (19,20))
+    fig, ax = plt.subplots(figsize = (19,25))
     ax.boxplot(permute.importances[sorted_idx].T,
            vert=False, labels=new_feature_list)
     ax.set_title("Permutation Importances")
@@ -383,10 +397,21 @@ print(f"Accuracy: {accuracy:.2f}")
 report = classification_report(y_test, y_pred)
 print("Classification Report:\n", report)
 
+#Confusion numbers for baseline
+confusion = confusion_matrix(y_test, y_pred)
+print(confusion)
+
 #Plot Confusion Matrix
 confusion_matrix_plot(y_pred, y_test['Cld_Msk'], pred_classes, true_classes)
 
 #Plot Confusion Matrix for baseline
 confusion_matrix_plot(y_test_baseline, y_test['Cld_Msk'], pred_classes, true_classes)
+
+acc = metrics.accuracy_score(y_test, y_test_baseline)
+print("baseline validation accuracy: ", np.around(acc*100), '%')
+
+#Confusion numbers for baseline
+confusion = confusion_matrix(y_test, y_test_baseline)
+print(confusion)
 
 # %%
