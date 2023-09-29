@@ -25,12 +25,16 @@ processed_GFS_directory = '/mnt/data2/mking/ATS780/processed_GFS_files/'
 # Specify the local directory where the interpolated CLAVRx data resides
 clavrx_directory = '/mnt/data2/mking/ATS780/CLAVRX_data/'
 
+# Specify the local direcotry where the persistance interpolated CLAVRx data resides
+persistance_directory = '/mnt/data2/mking/ATS780/Persist_CLAVRX_data_/'
+
 #Get the sorted file list in each directory
 clavrx_flist = sorted(glob.glob(clavrx_directory + '*'))
 GFS_flist = sorted(glob.glob(processed_GFS_directory + '*'))
+persist_flist = sorted(glob.glob(persistance_directory + '*'))
 
 #%%
-#Select 100 random latitude/longitude values to use on each file
+#Select a number of random latitude/longitude values to use on each file
 
 #Define the lat/lon values used from CLAVR_x_organizer
 res = 0.02
@@ -50,8 +54,9 @@ meshlon, meshlat = np.meshgrid(len_lon, len_lat)
 random.seed(42)
 
 #Generate random lat/lon pairs
-random_lat_lon_idx_pairs = np.empty((len(clavrx_flist)*100, 2)).astype(int)
-for idx in range(len(clavrx_flist)*100):
+num_of_pairs_each_time = 200
+random_lat_lon_idx_pairs = np.empty((len(clavrx_flist)*num_of_pairs_each_time, 2)).astype(int)
+for idx in range(len(clavrx_flist)*num_of_pairs_each_time):
     lat_idx = random.randint(0, np.shape(len_lat)[0] - 1)
     lon_idx = random.randint(0, np.shape(len_lon)[0] - 1)
     random_lat_lon_idx_pairs[idx,0] = lat_idx
@@ -69,6 +74,13 @@ for idx in range(len(clavrx_flist)):
     cloud_mask[(cloud_mask_data >= 2 )] = 1 #Anything probably cloudy and cloudy becomes 1
     cloud_mask[(cloud_mask_data < 2)] = 0 #Anything probably clear and clear becomes 0
 
+    #Load clavrx data and update values to 0 and 1
+    persist_load = xr.open_dataset(persist_flist[idx])
+    persist_data = np.squeeze(persist_load['cloud_mask'].data) #0 clear, 1 probably clear, 2 probably cloud, 3 cloudy
+    persist_mask = np.empty(persist_data.shape)
+    persist_mask[(persist_data >= 2 )] = 1 #Anything probably cloudy and cloudy becomes 1
+    persist_mask[(persist_data < 2)] = 0 #Anything probably clear and clear becomes 0
+
     #Load GFS data 
     GFS_load = xr.open_dataset(GFS_flist[idx])
     isobaric = GFS_load['isobaric'].data
@@ -76,16 +88,18 @@ for idx in range(len(clavrx_flist)):
     vertical_velocity_data = np.squeeze(GFS_load['vertical_velocity'].data)
     temperature_data = np.squeeze(GFS_load['temperature'].data)
     absolute_vorticity_data = np.squeeze(GFS_load['absolute vorticity'].data)
+    cloud_mixing_ratio_data = np.squeeze(GFS_load['cloud_mixing_ratio'].data)
+    total_cloud_cover_data = np.squeeze(GFS_load['total_cloud_cover'].data)
 
     # Initialize an empty dictionary to store the data for each variable
     data_dict = {}
 
     # Variable names
-    variable_names = ['Cld_Msk', 'RH', 'VV', 'Temp', 'AbsVort']  
+    variable_names = ['Cld_Msk', 'Cld_Msk_Persist','RH', 'VV', 'Temp', 'AbsVort', 'Cld_Mix_Ratio', 'Total_Cld_Cvr']  
 
     #Current lat/lon index values
-    pair_idx_1 = idx * 100
-    pair_idx_2 = (idx * 100) + 100
+    pair_idx_1 = idx * num_of_pairs_each_time
+    pair_idx_2 = (idx * num_of_pairs_each_time) + num_of_pairs_each_time
 
     # Loop through variable names
     for variable in variable_names:
@@ -94,6 +108,17 @@ for idx in range(len(clavrx_flist)):
         if variable == 'Cld_Msk':
             
             data = cloud_mask[random_lat_lon_idx_pairs[ pair_idx_1 : pair_idx_2 , 0 ], random_lat_lon_idx_pairs[ pair_idx_1 : pair_idx_2 , 1 ] ]
+
+            # Create column name
+            column_name = f'{variable}'
+            
+            # Add data to the dictionary
+            data_dict[column_name] = data
+        
+        #Add Cld_Msk values        
+        if variable == 'Cld_Msk_Persist':
+            
+            data = persist_mask[random_lat_lon_idx_pairs[ pair_idx_1 : pair_idx_2 , 0 ], random_lat_lon_idx_pairs[ pair_idx_1 : pair_idx_2 , 1 ] ]
 
             # Create column name
             column_name = f'{variable}'
@@ -113,23 +138,35 @@ for idx in range(len(clavrx_flist)):
                 # Add data to the dictionary
                 data_dict[column_name] = data
 
-            # elif variable == 'VV':
-            #     data = vertical_velocity_data[isobaric == pressure_level, random_lat_lon_idx_pairs[ pair_idx_1 : pair_idx_2 , 0 ], random_lat_lon_idx_pairs[ pair_idx_1 : pair_idx_2 , 1 ]]
+            elif variable == 'VV':
+                data = vertical_velocity_data[isobaric == pressure_level, random_lat_lon_idx_pairs[ pair_idx_1 : pair_idx_2 , 0 ], random_lat_lon_idx_pairs[ pair_idx_1 : pair_idx_2 , 1 ]]
 
-            #     # Add data to the dictionary
-            #     data_dict[column_name] = data
+                # Add data to the dictionary
+                data_dict[column_name] = data
 
-            # elif variable == 'Temp':
-            #     data = temperature_data[isobaric == pressure_level, random_lat_lon_idx_pairs[ pair_idx_1 : pair_idx_2 , 0 ], random_lat_lon_idx_pairs[ pair_idx_1 : pair_idx_2 , 1 ]]
+            elif variable == 'Temp':
+                data = temperature_data[isobaric == pressure_level, random_lat_lon_idx_pairs[ pair_idx_1 : pair_idx_2 , 0 ], random_lat_lon_idx_pairs[ pair_idx_1 : pair_idx_2 , 1 ]]
 
-            #     # Add data to the dictionary
-            #     data_dict[column_name] = data
+                # Add data to the dictionary
+                data_dict[column_name] = data
 
-            # elif variable == 'AbsVort':
-            #     data = absolute_vorticity_data[isobaric == pressure_level, random_lat_lon_idx_pairs[ pair_idx_1 : pair_idx_2 , 0 ], random_lat_lon_idx_pairs[ pair_idx_1 : pair_idx_2 , 1 ]]
+            elif variable == 'AbsVort':
+                data = absolute_vorticity_data[isobaric == pressure_level, random_lat_lon_idx_pairs[ pair_idx_1 : pair_idx_2 , 0 ], random_lat_lon_idx_pairs[ pair_idx_1 : pair_idx_2 , 1 ]]
 
-            #     # Add data to the dictionary
-            #     data_dict[column_name] = data
+                # Add data to the dictionary
+                data_dict[column_name] = data
+
+            elif variable == 'Cld_Mix_Ratio':
+                data = cloud_mixing_ratio_data[isobaric == pressure_level, random_lat_lon_idx_pairs[ pair_idx_1 : pair_idx_2 , 0 ], random_lat_lon_idx_pairs[ pair_idx_1 : pair_idx_2 , 1 ]]
+
+                # Add data to the dictionary
+                data_dict[column_name] = data
+
+            elif variable == 'Total_Cld_Cvr':
+                data = total_cloud_cover_data[isobaric == pressure_level, random_lat_lon_idx_pairs[ pair_idx_1 : pair_idx_2 , 0 ], random_lat_lon_idx_pairs[ pair_idx_1 : pair_idx_2 , 1 ]]
+
+                # Add data to the dictionary
+                data_dict[column_name] = data
 
     if idx == 0: #If first file...create dataframe
         df = pd.DataFrame(data_dict)
@@ -149,8 +186,8 @@ df.to_csv('HW1_data.csv', index=False)
 
 #%%
 # Split the data
-X = df.drop(columns=['Cld_Msk'])
-y = df['Cld_Msk']
+X = df.drop(columns=['Cld_Msk','Cld_Msk_Persist'])
+y = df[['Cld_Msk','Cld_Msk_Persist']]
 
 # Reserve the held-back testing data
 X_trainval, X_test, y_trainval, y_test = train_test_split(X, y, test_size=.2,random_state=13) 
@@ -158,8 +195,13 @@ X_trainval, X_test, y_trainval, y_test = train_test_split(X, y, test_size=.2,ran
 # Now reserve validation for hyperparamter tuning
 X_train, X_val, y_train, y_val = train_test_split(X_trainval, y_trainval, test_size=.2,random_state=13)
 
-#Define classes
-classes = ['cloud']
+# Get Cld_Msk_Persist for each dataset to use as baseline
+y_test_baseline = y_test['Cld_Msk_Persist']
+y_test = y_test.drop(columns=['Cld_Msk_Persist'])
+y_train_baseline = y_train['Cld_Msk_Persist']
+y_train = y_train.drop(columns=['Cld_Msk_Persist'])
+y_val_baseline = y_val['Cld_Msk_Persist']
+y_val = y_val.drop(columns=['Cld_Msk_Persist'])
 
 # %%
 #Define random forest and train model
@@ -168,8 +210,8 @@ classes = ['cloud']
 fd = {
     "tree_number": 100,    # number of trees to "average" together to create a random forest
     "tree_depth": 8,      # maximum depth allowed for each tree
-    "node_split": 20,     # minimum number of training samples needed to split a node
-    "leaf_samples": 1,    # minimum number of training samples required to make a leaf node
+    "node_split": 50,     # minimum number of training samples needed to split a node
+    "leaf_samples": 50,    # minimum number of training samples required to make a leaf node
     "criterion": 'gini',  # information gain metric, 'gini' or 'entropy'
     "bootstrap": False,   # whether to perform "bagging=bootstrap aggregating" or not
     "max_samples": None,  # number of samples to grab when training each tree IF bootstrap=True, otherwise None 
@@ -202,6 +244,28 @@ confusion = confusion_matrix(y_train, y_pred_train)
 
 print(confusion)
 
+pred_classes = ['Pred No Cloud', 'Pred Cloud']
+true_classes = ['True No Cloud', 'True Cloud']
+
+def confusion_matrix_plot(predclasses, targclasses, pred_classes, true_classes):
+  class_names = np.unique(targclasses)
+  table = []
+  for pred_class in class_names:
+    row = []
+    for true_class in class_names:
+        row.append(100 * np.mean(predclasses[targclasses == true_class] == pred_class))
+    table.append(row)
+  class_titles_t = true_classes
+  class_titles_p = pred_classes
+  conf_matrix = pd.DataFrame(table, index=class_titles_t, columns=class_titles_p)
+  display(conf_matrix.style.background_gradient(cmap='Greens').format("{:.1f}"))
+
+#Plot Confusion Matrix
+confusion_matrix_plot(y_pred_train, y_train['Cld_Msk'], pred_classes, true_classes)
+
+#Plot Confusion Matrix for baseline
+confusion_matrix_plot(y_train_baseline, y_train['Cld_Msk'], pred_classes, true_classes)
+
 #%%
 #Confusion Matrix on validation data
 
@@ -214,6 +278,12 @@ print("validation accuracy: ", np.around(acc*100), '%')
 confusion_validation = confusion_matrix(y_val, y_pred_val)
 
 print(confusion_validation)
+
+#Plot Confusion Matrix
+confusion_matrix_plot(y_pred_val, y_val['Cld_Msk'], pred_classes, true_classes)
+
+#Plot Confusion Matrix for baseline
+confusion_matrix_plot(y_val_baseline, y_val['Cld_Msk'], pred_classes, true_classes)
 
 #%%
 #Look at individual tree
@@ -261,7 +331,7 @@ def calc_importances(rf, feature_list):
 
 def plot_feat_importances(importances, feature_list):
     ''' Plot the feature importance calculated by calc_importances ''' 
-    plt.figure(figsize=(19,20))
+    plt.figure(figsize=(19,35))
     # Set the style
     plt.style.use('fivethirtyeight')
     # list of x locations for plotting
@@ -312,5 +382,11 @@ print(f"Accuracy: {accuracy:.2f}")
 
 report = classification_report(y_test, y_pred)
 print("Classification Report:\n", report)
+
+#Plot Confusion Matrix
+confusion_matrix_plot(y_pred, y_test['Cld_Msk'], pred_classes, true_classes)
+
+#Plot Confusion Matrix for baseline
+confusion_matrix_plot(y_test_baseline, y_test['Cld_Msk'], pred_classes, true_classes)
 
 # %%
